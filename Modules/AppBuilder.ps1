@@ -45,14 +45,23 @@ RULES:
 6. Dark theme: Background=#1e1e1e, Foreground=#e0e0e0, Accent=#7c3aed, Font=Segoe UI
 7. Add a Help menu with an "About" item that shows a MessageBox:
    "Built with BildsyPS — AI-powered shell orchestrator`nhttps://github.com/gsultani/bildsyps"
-8. If the app uses data persistence, use a JSON file in: Join-Path $env:APPDATA $appName
+8. If the app uses data persistence, store ALL data files (JSON, SQLite, logs) in:
+   Join-Path $env:APPDATA $appName
+   Create the directory if it does not exist. NEVER store data files alongside the script or exe.
 9. Add proper form disposal and cleanup.
-10. The script must work when compiled to .exe via ps2exe.
+10. The script must work when compiled to .exe via ps2exe (which targets Windows PowerShell 5.1).
+    Do NOT use PowerShell 7+ only syntax: ?? (null-coalescing), ??= (null-coalescing assignment),
+    or ?. / ?[] (null-conditional member/index access). These cause parse errors in ps2exe.
+    Use if ($null -ne $x) { $x } else { $default } instead of $x ?? $default.
 11. Start with: Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 12. NEVER hardcode or generate placeholder API keys, tokens, passwords, or secrets in the code.
     If the app needs API credentials, create a Settings dialog where the user can enter their own
     key at runtime. Persist settings to the app's JSON config file (see rule 8). Mask the key
     in the UI with PasswordChar='*'.
+13. Variables assigned inside WinForms event handler scriptblocks (Add_Click, Add_PrintPage, etc.)
+    are scoped locally. To share data between a handler and its parent function, use the Form's
+    .Tag property, a [ref] wrapper, or a hashtable/ArrayList (reference types). NEVER rely on
+    bare $variable = value inside handlers to update the parent scope.
 
 Output ONLY the code block. No explanations before or after.
 '@
@@ -500,6 +509,20 @@ function Test-GeneratedCode {
         foreach ($dp in $dangerousPatterns) {
             if ($code -match $dp.Pattern) {
                 $errors += "[$fileName] Security: contains $($dp.Name)"
+            }
+        }
+
+        # PS7+ compatibility scan (these operators break ps2exe / Windows PowerShell 5.1)
+        if ($ext -eq '.ps1') {
+            $compatPatterns = @(
+                @{ Pattern = '\?\?';  Name = 'null-coalescing operator ?? (PS7+ only, breaks ps2exe)' }
+                @{ Pattern = '\?\.';  Name = 'null-conditional operator ?. (PS7+ only, breaks ps2exe)' }
+                @{ Pattern = '\?\[';  Name = 'null-conditional index ?[] (PS7+ only, breaks ps2exe)' }
+            )
+            foreach ($cp in $compatPatterns) {
+                if ($code -match $cp.Pattern) {
+                    $errors += "[$fileName] Compatibility: contains $($cp.Name)"
+                }
             }
         }
 

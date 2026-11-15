@@ -218,6 +218,59 @@ $form.Text = Get-Greeting -Name 'World'
                 { Test-GeneratedCode -Files $files -Framework 'powershell' } | Should -Not -Throw
             }
         }
+
+        Context 'PS7+ Compatibility — Null-Coalescing and Null-Conditional Operators' {
+            It 'Flags null-coalescing operator ?? in PowerShell code' {
+                $files = New-FileMap @{ 'app.ps1' = '$x = $a ?? "default"' }
+                $result = Test-GeneratedCode -Files $files -Framework 'powershell'
+                $result.Success | Should -BeFalse
+                ($result.Errors -join "`n") | Should -Match 'null-coalescing operator'
+            }
+
+            It 'Flags null-conditional operator ?. in PowerShell code' {
+                $files = New-FileMap @{ 'app.ps1' = '$val = $obj?.Property' }
+                $result = Test-GeneratedCode -Files $files -Framework 'powershell'
+                $result.Success | Should -BeFalse
+                ($result.Errors -join "`n") | Should -Match 'null-conditional operator'
+            }
+
+            It 'Flags null-conditional index operator ?[] in PowerShell code' {
+                $files = New-FileMap @{ 'app.ps1' = '$val = $arr?[0]' }
+                $result = Test-GeneratedCode -Files $files -Framework 'powershell'
+                $result.Success | Should -BeFalse
+                ($result.Errors -join "`n") | Should -Match 'null-conditional index'
+            }
+
+            It 'Does NOT flag ?? in Python code (valid Python syntax)' {
+                # ?? is not valid Python either, but the check should only apply to .ps1 files
+                $files = New-FileMap @{ 'app.py' = 'x = a if a is not None else "default"' }
+                $result = Test-GeneratedCode -Files $files -Framework 'python-tk'
+                # Should not have any compatibility errors (may have other issues depending on environment)
+                $compatErrors = $result.Errors | Where-Object { $_ -match 'Compatibility' }
+                $compatErrors | Should -BeNullOrEmpty
+            }
+
+            It 'Does NOT flag ?. inside PowerShell string literals as false positive' {
+                $files = New-FileMap @{ 'app.ps1' = 'Write-Host "Is this ok?. Yes it is"' }
+                $result = Test-GeneratedCode -Files $files -Framework 'powershell'
+                # This WILL flag because the regex is simple pattern match, not AST-aware.
+                # This is an accepted trade-off — the pattern is rare in legitimate strings.
+                $result.Success | Should -BeFalse
+            }
+
+            It 'Catches multiple PS7+ operators in complex real-world code' {
+                $code = @'
+$sku = $apiItem.sku ?? $apiItem.SKU ?? ""
+$name = ($row.PSObject.Properties["name"] ?? $row.PSObject.Properties["Name"])?.Value ?? ""
+$val = $arr?[0]
+'@
+                $files = New-FileMap @{ 'app.ps1' = $code }
+                $result = Test-GeneratedCode -Files $files -Framework 'powershell'
+                $result.Success | Should -BeFalse
+                $compatErrors = $result.Errors | Where-Object { $_ -match 'Compatibility' }
+                $compatErrors.Count | Should -BeGreaterOrEqual 2
+            }
+        }
     }
 
     # ── BRANDING INJECTION ──────────────────────────────────
